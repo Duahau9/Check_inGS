@@ -1,41 +1,44 @@
-import { useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { NavLink } from 'react-router-dom';
 
-export function useRealtime({ table, callback, filter }) {
-  useEffect(() => {
-    const channel = supabase.channel(`${table}-channel`);
+export function Layout({ children, navItems = [], profile }) {
+  return (
+    <div className="app-layout">
+      <header className="app-header">
+        <div>
+          <h1>Gia Sư Check-in</h1>
+          <p>
+            {profile?.full_name ||
+              profile?.name ||
+              profile?.email ||
+              'Tài khoản'}
+          </p>
+        </div>
+      </header>
 
-    channel.on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table,
-        ...(filter ? { filter } : {})
-      },
-      callback
-    );
+      <main className="app-content">
+        {children}
+      </main>
 
-    channel.subscribe();
+      {navItems.length > 0 && (
+        <nav className="app-nav">
+          {navItems.map((item) => {
+            const Icon = item.icon;
 
-    return () => {
-      channel.unsubscribe();
-    };
-  }, [table, callback, filter]);
-}
-
-export function subscribeNotifications(userId, callback) {
-  return supabase
-    .channel('notifications-channel')
-    .on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${userId}`
-      },
-      callback
-    )
-    .subscribe();
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `app-nav-item ${isActive ? 'active' : ''}`
+                }
+              >
+                {Icon && <Icon size={20} />}
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+      )}
+    </div>
+  );
 }
