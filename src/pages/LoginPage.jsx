@@ -1,55 +1,78 @@
-import { Route, Routes, Navigate } from 'react-router-dom';
-import { useMemo } from 'react';
-import { Bell, History, MapPinned, Settings, UserCog } from 'lucide-react';
-import { AppProvider, useApp } from './context/AppContext';
-import { Layout } from './components/Layout';
-import { LoginPage } from './pages/LoginPage';
-import { TutorDashboard } from './pages/TutorDashboard';
-import { ParentDashboard } from './pages/ParentDashboard';
-import { HistoryPage } from './pages/HistoryPage';
-import { NotificationsPage } from './pages/NotificationsPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { NotFoundPage } from './pages/NotFoundPage';
+import { useState } from 'react';
+import { supabase, getSupabaseConfigError } from '../lib/supabase';
+import { useApp } from '../context/AppContext';
 
-function AppRoutes() {
-  const { session, profile, loading } = useApp();
+export function LoginPage() {
+  const { setSession, setProfile } = useApp();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const navItems = useMemo(() => {
-    const items = [
-      { to: '/', label: 'Trang chủ', icon: MapPinned },
-      { to: '/history', label: 'Lịch sử', icon: History },
-      { to: '/notifications', label: 'Thông báo', icon: Bell },
-      { to: '/settings', label: 'Tài khoản', icon: Settings }
-    ];
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    setError('');
 
-    if (profile?.role === 'tutor') {
-      items.splice(2, 0, { to: '/management', label: 'Quản lý', icon: UserCog });
+    const configError = getSupabaseConfigError();
+    if (configError) {
+      setError(configError);
+      return;
     }
 
-    return items;
-  }, [profile?.role]);
+    setLoading(true);
 
-  if (loading) return <div className="loading-screen">Đang tải ứng dụng...</div>;
-  if (!session || !profile) return <LoginPage />;
+    try {
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+      if (loginError) throw loginError;
+
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('auth_user_id', data.user.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      setSession(data.session);
+      setProfile(profileData);
+    } catch (loginError) {
+      setError(loginError.message || 'Đăng nhập thất bại.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <Layout navItems={navItems} profile={profile}>
-      <Routes>
-        <Route path="/" element={profile.role === 'tutor' ? <TutorDashboard /> : <ParentDashboard />} />
-        <Route path="/history" element={<HistoryPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/management" element={profile.role === 'tutor' ? <TutorDashboard /> : <Navigate to="/" replace />} />
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
-    </Layout>
-  );
-}
+    <div className="app-shell">
+      <div className="card login-card">
+        <div className="brand" style={{ justifyContent: 'center', marginBottom: 24 }}>
+          <div className="brand-mark" aria-hidden="true">✓</div>
+          <strong>Gia Sư Check-in</strong>
+        </div>
 
-export default function App() {
-  return (
-    <AppProvider>
-      <AppRoutes />
-    </AppProvider>
+        <h1 style={{ margin: '0 0 8px', textAlign: 'center' }}>Đăng nhập</h1>
+        <p className="muted" style={{ textAlign: 'center', margin: '0 0 22px' }}>
+          Quản lý check-in/check-out, GPS và lịch sử.
+        </p>
+
+        <form onSubmit={handleLogin} className="form-grid">
+          <label>
+            <span className="muted" style={{ display: 'block', marginBottom: 8 }}>Email</span>
+            <input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
+          </label>
+
+          <label>
+            <span className="muted" style={{ display: 'block', marginBottom: 8 }}>Mật khẩu</span>
+            <input className="input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" />
+          </label>
+
+          {error && <div className="status-chip status-red" role="alert" style={{ width: '100%' }}>{error}</div>}
+
+          <button type="submit" className="primary-btn" disabled={loading}>
+            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
