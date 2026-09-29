@@ -11,8 +11,6 @@ export function LoginPage() {
 
   const handleLogin = async (event) => {
     event.preventDefault();
-    setError('');
-
     const configError = getSupabaseConfigError();
     if (configError) {
       setError(configError);
@@ -20,10 +18,13 @@ export function LoginPage() {
     }
 
     setLoading(true);
+    setError('');
 
     try {
       const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
       if (loginError) throw loginError;
+
+      setSession(data.session);
 
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
@@ -32,47 +33,63 @@ export function LoginPage() {
         .single();
 
       if (profileError) throw profileError;
-
-      setSession(data.session);
       setProfile(profileData);
-    } catch (loginError) {
-      setError(loginError.message || 'Đăng nhập thất bại.');
+    } catch (err) {
+      setError(err.message || 'Đăng nhập thất bại');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="app-shell">
-      <div className="card login-card">
-        <div className="brand" style={{ justifyContent: 'center', marginBottom: 24 }}>
-          <div className="brand-mark" aria-hidden="true">✓</div>
-          <strong>Gia Sư Check-in</strong>
-        </div>
+    <div style={{ maxWidth: 420, margin: '20vh auto 0', padding: 24, borderRadius: 20, background: '#fff', boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)' }}>
+      <h2 style={{ marginBottom: 8, textAlign: 'center' }}>Gia Sư Check-in</h2>
+      <p style={{ margin: '0 0 22px', color: '#6b7280', textAlign: 'center' }}>Đăng nhập với tài khoản Supabase</p>
 
-        <h1 style={{ margin: '0 0 8px', textAlign: 'center' }}>Đăng nhập</h1>
-        <p className="muted" style={{ textAlign: 'center', margin: '0 0 22px' }}>
-          Quản lý check-in/check-out, GPS và lịch sử.
-        </p>
+      <form onSubmit={handleLogin} style={{ display: 'grid', gap: 16 }}>
+        <label>
+          <div style={{ marginBottom: 8, color: '#6b7280' }}>Email</div>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid #e5e7eb' }}
+          />
+        </label>
 
-        <form onSubmit={handleLogin} className="form-grid">
-          <label>
-            <span className="muted" style={{ display: 'block', marginBottom: 8 }}>Email</span>
-            <input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
-          </label>
+        <label>
+          <div style={{ marginBottom: 8, color: '#6b7280' }}>Mật khẩu</div>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid #e5e7eb' }}
+          />
+        </label>
 
-          <label>
-            <span className="muted" style={{ display: 'block', marginBottom: 8 }}>Mật khẩu</span>
-            <input className="input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" />
-          </label>
+        {error && (
+          <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 12px', borderRadius: 12 }}>
+            {error}
+          </div>
+        )}
 
-          {error && <div className="status-chip status-red" role="alert" style={{ width: '100%' }}>{error}</div>}
-
-          <button type="submit" className="primary-btn" disabled={loading}>
-            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-          </button>
-        </form>
-      </div>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            background: '#1d4ed8',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 12,
+            padding: '14px 18px',
+            fontWeight: 700
+          }}
+        >
+          {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+        </button>
+      </form>
     </div>
   );
 }
