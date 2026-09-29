@@ -12,3 +12,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+export function getSupabaseConfigError() {
+  if (!isSupabaseConfigured) {
+    return 'Vui lòng cấu hình VITE_SUPABASE_URL và VITE_SUPABASE_ANON_KEY trong file .env';
+  }
+
+  return null;
+}
