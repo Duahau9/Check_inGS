@@ -1,35 +1,56 @@
+import { useEffect, useState } from 'react';
+import { useApp } from '../context/AppContext';
+import { getNotificationsForUser, markNotificationRead } from '../services/attendanceService';
+
 export function NotificationsPage() {
-  const items = [
-    { title: 'Gia sư đã check-in', time: '19:02', isRead: false },
-    { title: 'Gia sư đã check-out', time: '20:58', isRead: false },
-    { title: 'Buổi học ngày 28/09 đã hoàn thành', time: '08:30', isRead: true }
-  ];
+  const { profile } = useApp();
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    async function loadNotifications() {
+      if (!profile?.id) return;
+      const { data } = await getNotificationsForUser(profile.id);
+      setItems(data || []);
+    }
+    loadNotifications();
+  }, [profile?.id]);
+
+  const handleRead = async (id) => {
+    await markNotificationRead(id);
+    setItems((prev) => prev.map((item) => item.id === id ? { ...item, is_read: true } : item));
+  };
 
   return (
-    <div>
-      <h1 className="page-title">Thông báo</h1>
+    <div style={{ paddingBottom: 90 }}>
+      <h1 style={{ marginBottom: 20 }}>Thông báo</h1>
 
-      <div className="card panel" style={{ marginTop: 18 }}>
-        {items.map((item) => (
-          <div
-            key={item.title}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '12px 0',
-              borderBottom: '1px solid #e5e7eb'
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 700 }}>{item.title}</div>
-              <div className="muted">{item.time}</div>
+      <div style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)' }}>
+        {items.length === 0 ? (
+          <div style={{ color: '#6b7280' }}>Chưa có thông báo nào.</div>
+        ) : (
+          items.map((item) => (
+            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '12px 0', borderBottom: '1px solid #e5e7eb' }}>
+              <div>
+                <div style={{ fontWeight: 700 }}>{item.title}</div>
+                <div style={{ color: '#6b7280', marginTop: 4 }}>{new Date(item.created_at).toLocaleString('vi-VN')}</div>
+              </div>
+
+              <button
+                onClick={() => handleRead(item.id)}
+                style={{
+                  background: item.is_read ? '#f3f4f6' : '#dbeafe',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '8px 10px',
+                  fontWeight: 700,
+                  color: item.is_read ? '#6b7280' : '#1d4ed8'
+                }}
+              >
+                {item.is_read ? 'Đã đọc' : 'Đánh dấu đã đọc'}
+              </button>
             </div>
-            <div style={{ color: item.isRead ? '#6b7280' : '#1d4ed8', fontWeight: 700 }}>
-              {item.isRead ? 'Đã đọc' : 'Mới'}
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );

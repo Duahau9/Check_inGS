@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, getSupabaseConfigError } from '../lib/supabase';
 import { useApp } from '../context/AppContext';
 
 export function LoginPage() {
-  const { setProfile, setSession } = useApp();
+  const { setSession, setProfile } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -11,92 +11,85 @@ export function LoginPage() {
 
   const handleLogin = async (event) => {
     event.preventDefault();
-    setError('');
-
-    if (!isSupabaseConfigured) {
-      setError('Vui lòng cấu hình VITE_SUPABASE_URL và VITE_SUPABASE_ANON_KEY trong file .env');
+    const configError = getSupabaseConfigError();
+    if (configError) {
+      setError(configError);
       return;
     }
 
-    try {
-      setLoading(true);
-      const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(true);
+    setError('');
 
-      if (authError) {
-        throw authError;
-      }
+    try {
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+      if (loginError) throw loginError;
 
       setSession(data.session);
 
-      const { data: profileData } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('auth_user_id', data.user.id)
         .single();
 
-      setProfile(profileData || null);
-    } catch (loginError) {
-      setError(loginError.message || 'Đăng nhập thất bại.');
+      if (profileError) throw profileError;
+      setProfile(profileData);
+    } catch (err) {
+      setError(err.message || 'Đăng nhập thất bại');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="app-shell">
-      <div className="card login-card">
-        <div style={{ marginBottom: 24 }}>
-          <div className="brand" style={{ justifyContent: 'center' }}>
-            <div className="brand-mark">
-              <span>✓</span>
-            </div>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>Gia Sư Check-in</div>
-            </div>
+    <div style={{ maxWidth: 420, margin: '20vh auto 0', padding: 24, borderRadius: 20, background: '#fff', boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)' }}>
+      <h2 style={{ marginBottom: 8, textAlign: 'center' }}>Gia Sư Check-in</h2>
+      <p style={{ margin: '0 0 22px', color: '#6b7280', textAlign: 'center' }}>Đăng nhập với tài khoản Supabase</p>
+
+      <form onSubmit={handleLogin} style={{ display: 'grid', gap: 16 }}>
+        <label>
+          <div style={{ marginBottom: 8, color: '#6b7280' }}>Email</div>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid #e5e7eb' }}
+          />
+        </label>
+
+        <label>
+          <div style={{ marginBottom: 8, color: '#6b7280' }}>Mật khẩu</div>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid #e5e7eb' }}
+          />
+        </label>
+
+        {error && (
+          <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 12px', borderRadius: 12 }}>
+            {error}
           </div>
-        </div>
+        )}
 
-        <h1 style={{ margin: '0 0 8px', textAlign: 'center' }}>Đăng nhập</h1>
-        <p className="muted" style={{ textAlign: 'center', margin: '0 0 22px' }}>
-          Quản lý check-in/check-out, GPS, quyền xem và lịch sử.
-        </p>
-
-        <form onSubmit={handleLogin} className="form-grid">
-          <label>
-            <span className="muted" style={{ display: 'block', marginBottom: 8 }}>Email</span>
-            <input
-              className="input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="tutor@example.com"
-              required
-            />
-          </label>
-
-          <label>
-            <span className="muted" style={{ display: 'block', marginBottom: 8 }}>Mật khẩu</span>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </label>
-
-          {error && (
-            <div className="status-chip status-red" style={{ width: '100%' }}>
-              {error}
-            </div>
-          )}
-
-          <button type="submit" className="primary-btn" disabled={loading}>
-            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-          </button>
-        </form>
-      </div>
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            background: '#1d4ed8',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 12,
+            padding: '14px 18px',
+            fontWeight: 700
+          }}
+        >
+          {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+        </button>
+      </form>
     </div>
   );
 }

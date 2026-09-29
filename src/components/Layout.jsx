@@ -1,38 +1,41 @@
-import { NavLink } from 'react-router-dom';
-import { House, Clock3, Bell, Settings, UserCircle2 } from 'lucide-react';
+import { useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
-export function Layout({ children, navItems = [], profile }) {
-  return (
-    <div className="app-shell">
-      <header className="app-topbar">
-        <div className="brand">
-          <div className="brand-mark">
-            <House size={20} />
-          </div>
-          <div>
-            <div>Gia Sư Check-in</div>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
-              {profile?.full_name || 'User'}
-            </div>
-          </div>
-        </div>
-      </header>
+export function useRealtime({ table, callback, filter }) {
+  useEffect(() => {
+    const channel = supabase.channel(`${table}-channel`);
 
-      <main>{children}</main>
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table,
+        ...(filter ? { filter } : {})
+      },
+      callback
+    );
 
-      <nav className="bottom-nav" aria-label="Bottom navigation">
-        {navItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-            end={to === '/'}
-          >
-            <Icon size={18} />
-            <span>{label}</span>
-          </NavLink>
-        ))}
-      </nav>
-    </div>
-  );
+    channel.subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [table, callback, filter]);
+}
+
+export function subscribeNotifications(userId, callback) {
+  return supabase
+    .channel('notifications-channel')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`
+      },
+      callback
+    )
+    .subscribe();
 }

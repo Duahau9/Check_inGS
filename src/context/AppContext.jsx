@@ -1,49 +1,21 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
-const AppContext = createContext(null);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-export function AppProvider({ children }) {
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
+});
 
-  useEffect(() => {
-    const loadSession = async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      setSession(currentSession);
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
-      if (currentSession) {
-        const { data } = await supabase.from('profiles').select('*').eq('auth_user_id', currentSession.user.id).single();
-        setProfile(data || null);
-      }
-
-      setLoading(false);
-    };
-
-    loadSession();
-
-    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      setSession(nextSession);
-
-      if (nextSession) {
-        const { data } = await supabase.from('profiles').select('*').eq('auth_user_id', nextSession.user.id).single();
-        setProfile(data || null);
-      } else {
-        setProfile(null);
-      }
-    });
-
-    return () => subscription.subscription.unsubscribe();
-  }, []);
-
-  const value = { session, profile, loading, setProfile, setSession };
-
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
-}
-
-export function useApp() {
-  const context = useContext(AppContext);
-  if (!context) throw new Error('useApp must be used within AppProvider');
-  return context;
+export function getSupabaseConfigError() {
+  if (!isSupabaseConfigured) {
+    return 'Vui lòng cấu hình VITE_SUPABASE_URL và VITE_SUPABASE_ANON_KEY trong file .env';
+  }
+  return null;
 }
