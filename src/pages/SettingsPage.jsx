@@ -1,57 +1,99 @@
-import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { getNotificationsForUser, markNotificationRead } from '../services/notificationService';
+import { supabase } from '../lib/supabase';
 
-export function NotificationsPage() {
-  const { profile } = useApp();
-  const [items, setItems] = useState([]);
+export function SettingsPage() {
+  const { profile, setSession, setProfile } = useApp();
 
-  useEffect(() => {
-    async function loadNotifications() {
-      if (!profile?.id) return;
-      const { data } = await getNotificationsForUser(profile.id);
-      setItems(data || []);
-    }
-    loadNotifications();
-  }, [profile?.id]);
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
 
-  const handleRead = async (id) => {
-    await markNotificationRead(id);
-    setItems((prev) => prev.map((item) => item.id === id ? { ...item, is_read: true } : item));
+    setSession(null);
+    setProfile(null);
   };
 
   return (
-    <div style={{ paddingBottom: 90 }}>
-      <h1 style={{ marginBottom: 20 }}>Thông báo</h1>
+    <div
+      style={{
+        display: 'grid',
+        gap: 16,
+        paddingBottom: 90
+      }}
+    >
+      <div>
+        <h1 style={{ margin: 0 }}>Tài khoản</h1>
 
-      <div style={{ background: '#fff', borderRadius: 20, padding: 20, boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)' }}>
-        {items.length === 0 ? (
-          <div style={{ color: '#6b7280' }}>Chưa có thông báo nào.</div>
-        ) : (
-          items.map((item) => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '12px 0', borderBottom: '1px solid #e5e7eb' }}>
-              <div>
-                <div style={{ fontWeight: 700 }}>{item.title}</div>
-                <div style={{ color: '#6b7280', marginTop: 4 }}>{new Date(item.created_at).toLocaleString('vi-VN')}</div>
-              </div>
-
-              <button
-                onClick={() => handleRead(item.id)}
-                style={{
-                  background: item.is_read ? '#f3f4f6' : '#dbeafe',
-                  border: 'none',
-                  borderRadius: 10,
-                  padding: '8px 10px',
-                  fontWeight: 700,
-                  color: item.is_read ? '#6b7280' : '#1d4ed8'
-                }}
-              >
-                {item.is_read ? 'Đã đọc' : 'Đánh dấu đã đọc'}
-              </button>
-            </div>
-          ))
-        )}
+        <p
+          style={{
+            color: '#6b7280',
+            marginTop: 8
+          }}
+        >
+          Thông tin tài khoản của bạn.
+        </p>
       </div>
+
+      <section
+        style={{
+          background: '#fff',
+          borderRadius: 18,
+          padding: 20,
+          boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)'
+        }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gap: 18
+          }}
+        >
+          <div>
+            <div style={{ color: '#6b7280', fontSize: 14 }}>
+              Họ và tên
+            </div>
+
+            <strong>
+              {profile?.full_name || 'Chưa cập nhật'}
+            </strong>
+          </div>
+
+          <div>
+            <div style={{ color: '#6b7280', fontSize: 14 }}>
+              Email
+            </div>
+
+            <strong>
+              {profile?.email || 'Chưa cập nhật'}
+            </strong>
+          </div>
+
+          <div>
+            <div style={{ color: '#6b7280', fontSize: 14 }}>
+              Vai trò
+            </div>
+
+            <strong>
+              {profile?.role === 'tutor'
+                ? 'Gia sư'
+                : 'Phụ huynh'}
+            </strong>
+          </div>
+        </div>
+      </section>
+
+      <button
+        onClick={handleLogout}
+        style={{
+          background: '#fee2e2',
+          color: '#b91c1c',
+          border: 'none',
+          borderRadius: 12,
+          padding: '14px 18px',
+          fontWeight: 700,
+          cursor: 'pointer'
+        }}
+      >
+        Đăng xuất
+      </button>
     </div>
   );
 }
