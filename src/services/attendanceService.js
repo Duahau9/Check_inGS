@@ -31,6 +31,16 @@ export async function getTodayAttendanceForTutor(tutorId) {
   return { data, error };
 }
 
+export async function getAttendanceHistoryForTutor(tutorId) {
+  const { data, error } = await supabase
+    .from('attendance')
+    .select('*')
+    .eq('tutor_id', tutorId)
+    .order('created_at', { ascending: false });
+
+  return { data, error };
+}
+
 export async function getAttendanceHistoryForParent(parentId) {
   const { data, error } = await supabase
     .from('attendance')
