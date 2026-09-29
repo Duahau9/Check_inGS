@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { getNotificationsForUser, markNotificationRead } from '../services/attendanceService';
+import { getNotificationsForUser, markNotificationRead } from '../services/notificationService';
 
 export function NotificationsPage() {
   const { profile } = useApp();
