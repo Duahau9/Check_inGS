@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tutor Check-In System</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Font: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .pulse-ring {
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            animation: pulse 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+        }
+        @keyframes pulse {
+            to {
+                box-shadow: 0 0 0 16px rgba(16, 185, 129, 0);
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // Default Mock Target Location (e.g. Student Home in HCMC)
+        const DEFAULT_STUDENT_LOC = {
+            lat: 10.7769,
+            lng: 106.7009,
+            name: "Nhà Học Viên A (Quận 1, TP.HCM)",
+            allowedRadiusMeters: 150
+        };
+
+        // Utility: Calculate Distance between 2 GPS Points (Haversine formula)
+        function getDistanceMeters(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // metres
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return Math.round(R * c); // in meters
+        }
+
+        // App Component
+        function App() {
+            // App state
+            const [role, setRole] = useState('tutor'); // 'tutor' | 'parent'
+            const [supabaseConfig, setSupabaseConfig] = useState(() => {
+                return JSON.parse(localStorage.getItem('supabase_config') || '{"url":"","key":""}');
+            });
+            const [isConfigOpen, setIsConfigOpen] = useState(false);
+            const [supabaseClient, setSupabaseClient] = useState(null);
+
+            // User / Class Info
+            const [tutorName, setTutorName] = useState('Nguyễn Văn A');
+            const [studentName, setStudentName] = useState('Bé Minh - Môn Toán 12');
+            
+            // Session state
+            const [activeSession, setActiveSession] = useState(() => {
+                return JSON.parse(localStorage.getItem('current_tutor_session')) || null;
+            });
+
+            // History
+            const [history, setHistory] = useState(() => {
+                const saved = localStorage.getItem('tutor_session_history');
+                if (saved) return JSON.parse(saved);
+                
+                // Demo historical data
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                
+                return [
+                    {
+                        id: 'sess-101',
+                        tutorName: 'Nguyễn Văn A',
+                        studentName: 'Bé Minh - Môn Toán 12',
+                        checkInTime: new Date(yesterday.setHours(17, 30, 0)).toISOString(),
+                        checkOutTime: new Date(yesterday.setHours(19, 30, 0)).toISOString(),
+                        durationMinutes: 120,
+                        checkInGps: { lat: 10.7769, lng: 106.7009, accuracy: 8, distance: 15 },
+                        checkOutGps: { lat: 10.7770, lng: 106.7010, accuracy: 10, distance: 20 },
+                        status: 'COMPLETED',
+                        isLocked: true // Locked because past 00:00
+                    }
+                ];
+            });
+
+            // GPS & Status states
+            const [currentGps, setCurrentGps] = useState(null);
+            const [gpsError, setGpsError] = useState(null);
+            const [isLoadingGps, setIsLoadingGps] = useState(false);
+            const [notice, setNotice] = useState(null);
+            const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+            // Supabase Client initialization
+            useEffect(() => {
+                if (supabaseConfig.url && supabaseConfig.key && window.supabase) {
+                    try {
+                        const client = window.supabase.createClient(supabaseConfig.url, supabaseConfig.key);
+                        setSupabaseClient(client);
+                    } catch (e) {
+                        console.error("Supabase Init Error:", e);
+                    }
+                }
+            }, [supabaseConfig]);
+
+            // Synchronize active session timer
+            useEffect(() => {
+                let interval = null;
+                if (activeSession && activeSession.status === 'IN_PROGRESS') {
+                    const checkInDate = new Date(activeSession.checkInTime);
+                    interval = setInterval(() => {
+                        const now = new Date();
+                        const diffSec = Math.floor((now - checkInDate) / 1000);
+                        setElapsedSeconds(diffSec > 0 ? diffSec : 0);
+                    }, 1000);
+                } else {
+                    setElapsedSeconds(0);
+                }
+                return () => clearInterval(interval);
+            }, [activeSession]);
+
+            // Save history & activeSession to localStorage for offline resilience
+            useEffect(() => {
+                localStorage.setItem('tutor_session_history', JSON.stringify(history));
+            }, [history]);
+
+            useEffect(() => {
+                if (activeSession) {
+                    localStorage.setItem('current_tutor_session', JSON.stringify(activeSession));
+                } else {
+                    localStorage.removeItem('current_tutor_session');
+                }
+            }, [activeSession]);
+
+            // Acquire GPS
+            const fetchGPS = () => {
+                return new Promise((resolve, reject) => {
+                    setIsLoadingGps(true);
+                    setGpsError(null);
+
+                    if (!navigator.geolocation) {
+                        const err = "Trình duyệt của bạn không hỗ trợ định vị GPS.";
+                        setGpsError(err);
+                        setIsLoadingGps(false);
+                        return reject(err);
+                    }
+
+                    const options = {
+                        enableHighAccuracy: true,
+                        timeout: 12000,
+                        maximumAge: 0
+                    };
+
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const { latitude, longitude, accuracy } = position.coords;
+                            const distance = getDistanceMeters(
+                                latitude, 
+                                longitude, 
+                                DEFAULT_STUDENT_LOC.lat, 
+                                DEFAULT_STUDENT_LOC.lng
+                            );
+
+                            const gpsData = {
+                                lat: latitude,
+                                lng: longitude,
+                                accuracy: Math.round(accuracy),
+                                distance: distance,
+                                timestamp: new Date().toISOString()
+                            };
+
+                            setCurrentGps(gpsData);
+                            setIsLoadingGps(false);
+                            resolve(gpsData);
+                        },
+                        (error) => {
+                            let msg = "Không thể lấy vị trí GPS.";
+                            if (error.code === error.PERMISSION_DENIED) {
+                                msg = "Bạn đã từ chối quyền truy cập vị trí. Vui lòng bật GPS trên thiết bị.";
+                            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                                msg = "Tín hiệu GPS yếu hoặc không khả dụng.";
+                            } else if (error.code === error.TIMEOUT) {
+                                msg = "Quá thời gian lấy vị trí GPS. Vui lòng thử lại ngoài trời.";
+                            }
+                            setGpsError(msg);
+                            setIsLoadingGps(false);
+                            reject(msg);
+                        },
+                        options
+                    );
+                });
+            };
+
+            // Notification Modal Handler
+            const showAlert = (title, message, type = 'info') => {
+                setNotice({ title, message, type });
+            };
+
+            // Check-In Action
+            const handleCheckIn = async () => {
+                try {
+                    const gps = await fetchGPS();
+
+                    // Check radius
+                    if (gps.distance > DEFAULT_STUDENT_LOC.allowedRadiusMeters) {
+                        showAlert(
+                            "Vị Trí Không Hợp Lệ", 
+                            `Khoảng cách từ bạn đến địa điểm dạy là ${gps.distance}m (cho phép tối đa ${DEFAULT_STUDENT_LOC.allowedRadiusMeters}m). Vui lòng di chuyển lại gần nhà học viên để Check-in.`,
+                            "warning"
+                        );
+                        return;
+                    }
+
+                    // Server Time simulation or Supabase Call
+                    const now = new Date().toISOString();
+                    const newSession = {
+                        id: 'sess-' + Date.now(),
+                        tutorName,
+                        studentName,
+                        checkInTime: now,
+                        checkOutTime: null,
+                        durationMinutes: 0,
+                        checkInGps: gps,
+                        checkOutGps: null,
+                        status: 'IN_PROGRESS',
+                        isLocked: false
+                    };
+
+                    // Send to Supabase if configured
+                    if (supabaseClient) {
+                        const { data, error } = await supabaseClient
+                            .from('attendance_logs')
+                            .insert([{
+                                tutor_name: tutorName,
+                                student_name: studentName,
+                                check_in_time: now,
+                                check_in_lat: gps.lat,
+                                check_in_lng: gps.lng,
+                                check_in_accuracy: gps.accuracy,
+                                status: 'IN_PROGRESS'
+                            }]);
+
+                        if (error) {
+                            console.warn("Lỗi lưu Supabase:", error);
+                        }
+                    }
+
+                    setActiveSession(newSession);
+                    showAlert("Check-in Thành Công!", `Đã ghi nhận bắt đầu buổi học lúc ${new Date(now).toLocaleTimeString('vi-VN')}. Thông báo đã được gửi đến Phụ huynh.`, "success");
+
+                } catch (err) {
+                    showAlert("Lỗi Check-in", typeof err === 'string' ? err : "Không thể lấy tọa độ GPS.", "error");
+                }
+            };
+
+            // Check-Out Action
+            const handleCheckOut = async () => {
+                if (!activeSession) return;
+
+                try {
+                    const gps = await fetchGPS();
+
+                    const checkOutTime = new Date();
+                    const checkInTime = new Date(activeSession.checkInTime);
+                    const durationMinutes = Math.max(1, Math.round((checkOutTime - checkInTime) / (1000 * 60)));
+
+                    const completedSession = {
+                        ...activeSession,
+                        checkOutTime: checkOutTime.toISOString(),
+                        durationMinutes,
+                        checkOutGps: gps,
+                        status: 'COMPLETED',
+                        isLocked: false
+                    };
+
+                    // Update Supabase if configured
+                    if (supabaseClient) {
+                        await supabaseClient
+                            .from('attendance_logs')
+                            .update({
+                                check_out_time: checkOutTime.toISOString(),
+                                duration_minutes: durationMinutes,
+                                check_out_lat: gps.lat,
+                                check_out_lng: gps.lng,
+                                check_out_accuracy: gps.accuracy,
+                                status: 'COMPLETED'
+                            })
+                            .eq('id', activeSession.id);
+                    }
+
+                    // Update local history
+                    setHistory(prev => [completedSession, ...prev]);
+                    setActiveSession(null);
+
+                    showAlert("Check-out Thành Công!", `Thời gian buổi dạy: ${durationMinutes} phút. Cảm ơn gia sư!`, "success");
+
+                } catch (err) {
+                    showAlert("Lỗi Check-out", typeof err === 'string' ? err : "Không thể lấy tọa độ GPS.", "error");
+                }
+            };
+
+            // Format seconds to HH:MM:SS
+            const formatTime = (totalSec) => {
+                const hrs = Math.floor(totalSec / 3600);
+                const mins = Math.floor((totalSec % 3600) / 60);
+                const secs = totalSec % 60;
+                return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            };
+
+            return (
+                <div class="max-w-md mx-auto min-h-screen bg-white shadow-xl flex flex-col justify-between">
+                    
+                    {/* Header */}
+                    <header class="bg-indigo-600 text-white p-4 sticky top-0 z-30 shadow-md">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <div class="bg-white/20 p-2 rounded-lg">
+                                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                </div>
+                                <div>
+                                    <h1 class="font-bold text-lg leading-tight">Tutor Check-In</h1>
+                                    <p class="text-xs text-indigo-200">Hệ thống Điểm danh Gia sư</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => setIsConfigOpen(true)}
+                                class="p-2 bg-indigo-500 hover:bg-indigo-700 rounded-lg text-xs font-medium flex items-center gap-1 transition"
+                            >
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                <span>DB</span>
+                            </button>
+                        </div>
+
+                        {/* Role Switcher Bar */}
+                        <div class="mt-3 grid grid-cols-2 bg-indigo-800/50 p-1 rounded-xl text-center text-xs font-semibold">
+                            <button 
+                                onClick={() => setRole('tutor')}
+                                class={`py-1.5 rounded-lg transition ${role === 'tutor' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-200'}`}
+                            >
+                                Gia Sư (Tutor)
+                            </button>
+                            <button 
+                                onClick={() => setRole('parent')}
+                                class={`py-1.5 rounded-lg transition ${role === 'parent' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-200'}`}
+                            >
+                                Phụ Huynh (Parent)
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* Main Content Area */}
+                    <main class="p-4 flex-1 space-y-4">
+
+                        {/* Config Status Banner */}
+                        {!supabaseConfig.url && (
+                            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-xs flex items-start space-x-2">
+                                <svg class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                <div>
+                                    <span class="font-bold">Đang chạy chế độ Local Mock:</span> Chưa kết nối Supabase Backend. Dữ liệu lưu tạm trên trình duyệt. Hãy bấm nút <span class="underline font-semibold">DB</span> góc phải trên để nhập API Keys.
+                                </div>
+                            </div>
+                        )}
+
+                        {/* VIEW FOR TUTOR */}
+                        {role === 'tutor' && (
+                            <div class="space-y-4">
+
+                                {/* Class Profile Card */}
+                                <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                                    <div class="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-1">Lớp Học Hiện Tại</div>
+                                    <div class="font-bold text-slate-800 text-base">{studentName}</div>
+                                    <div class="text-xs text-slate-600 mt-1 flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                                        Gia sư: <span class="font-semibold">{tutorName}</span>
+                                    </div>
+                                    <div class="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path></svg>
+                                        Mục tiêu GPS: {DEFAULT_STUDENT_LOC.name}
+                                    </div>
+                                </div>
+
+                                {/* Active Session Dashboard or Check-in Button */}
+                                {activeSession ? (
+                                    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center relative overflow-hidden shadow-sm">
+                                        <div class="inline-flex items-center space-x-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-full mb-3">
+                                            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                                            <span>Đang Dạy Hợp Lệ</span>
+                                        </div>
+
+                                        <div class="text-xs text-emerald-700 font-medium mb-1">Thời gian đã học</div>
+                                        <div class="text-4xl font-extrabold text-emerald-900 font-mono tracking-tight my-2">
+                                            {formatTime(elapsedSeconds)}
+                                        </div>
+
+                                        <div class="text-xs text-emerald-600 mb-4">
+                                            Check-in lúc: <span class="font-bold">{new Date(activeSession.checkInTime).toLocaleTimeString('vi-VN')}</span>
+                                        </div>
+
+                                        <button
+                                            onClick={handleCheckOut}
+                                            disabled={isLoadingGps}
+                                            class="w-full py-3.5 bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center space-x-2"
+                                        >
+                                            {isLoadingGps ? (
+                                                <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                            ) : (
+                                                <>
+                                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                                                    <span>CHECK-OUT (KẾT THÚC BUỔI HỌC)</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div class="bg-white border border-slate-200 rounded-2xl p-6 text-center shadow-sm">
+                                        <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                        </div>
+                                        <h2 class="font-bold text-slate-800 text-base mb-1">Sẵn Sàng Bắt Đầu Buổi Học</h2>
+                                        <p class="text-xs text-slate-500 mb-5">Hệ thống sẽ xác thực vị trí GPS trong bán kính 150m từ nhà học viên.</p>
+
+                                        <button
+                                            onClick={handleCheckIn}
+                                            disabled={isLoadingGps}
+                                            class="w-full py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-base rounded-2xl shadow-lg shadow-emerald-600/30 transition flex items-center justify-center space-x-2 pulse-ring"
+                                        >
+                                            {isLoadingGps ? (
+                                                <div class="flex items-center space-x-2">
+                                                    <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                    <span>Đang Lấy Vị Trí GPS...</span>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+                                                    <span>CHECK-IN BUỔI HỌC</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* GPS Info Debug Card */}
+                                {currentGps && (
+                                    <div class="bg-slate-800 text-slate-200 rounded-xl p-3 text-xs space-y-1 font-mono">
+                                        <div class="text-slate-400 font-bold mb-1 flex justify-between">
+                                            <span>Tín hiệu GPS Vừa Lấy:</span>
+                                            <span class={currentGps.distance <= 150 ? "text-emerald-400" : "text-rose-400"}>
+                                                {currentGps.distance <= 150 ? "Hợp Lệ" : "Quá Xa"}
+                                            </span>
+                                        </div>
+                                        <div>Tọa độ: {currentGps.lat.toFixed(5)}, {currentGps.lng.toFixed(5)}</div>
+                                        <div>Độ chính xác: ±{currentGps.accuracy} mét</div>
+                                        <div>Khoảng cách tới mục tiêu: {currentGps.distance} mét</div>
+                                    </div>
+                                )}
+
+                            </div>
+                        )}
+
+                        {/* VIEW FOR PARENT */}
+                        {role === 'parent' && (
+                            <div class="space-y-4">
+                                <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+                                    <h2 class="font-bold text-indigo-900 text-sm mb-1">Giao Diện Giám Sát Cho Phụ Huynh</h2>
+                                    <p class="text-xs text-indigo-700">Theo dõi thời gian thực buổi dạy của Gia sư {tutorName}. Thông báo tự động được gửi qua Telegram Bot.</p>
+                                </div>
+
+                                {/* Active Status */}
+                                {activeSession ? (
+                                    <div class="bg-emerald-500 text-white rounded-2xl p-4 shadow-md">
+                                        <div class="flex items-center justify-between">
+                                            <span class="text-xs font-semibold bg-emerald-700/50 px-2.5 py-1 rounded-full uppercase">Đang Diễn Ra</span>
+                                            <span class="text-xs opacity-90">Bắt đầu: {new Date(activeSession.checkInTime).toLocaleTimeString('vi-VN')}</span>
+                                        </div>
+                                        <div class="text-2xl font-bold mt-2">{studentName}</div>
+                                        <div class="text-xs opacity-90 mt-1">Gia sư đang tại điểm dạy (Cách {activeSession.checkInGps?.distance || 0}m)</div>
+                                    </div>
+                                ) : (
+                                    <div class="bg-slate-100 border border-slate-200 rounded-2xl p-4 text-center text-slate-500 text-xs">
+                                        Hiện tại chưa có buổi học nào đang tiến hành.
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* SESSION HISTORY SECTION (Common for both) */}
+                        <div class="pt-2">
+                            <div class="flex items-center justify-between mb-2">
+                                <h3 class="font-bold text-slate-800 text-sm">Lịch Sử Điểm Danh</h3>
+                                <span class="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded font-semibold">Tự động Khóa lúc 00:00</span>
+                            </div>
+
+                            <div class="space-y-2">
+                                {history.length === 0 ? (
+                                    <div class="text-center text-xs text-slate-400 py-6">Chưa có dữ liệu lịch sử.</div>
+                                ) : (
+                                    history.map((item) => (
+                                        <div key={item.id} class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:border-slate-300 transition">
+                                            <div class="flex items-start justify-between">
+                                                <div>
+                                                    <div class="font-bold text-xs text-slate-800">{new Date(item.checkInTime).toLocaleDateString('vi-VN', { weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit' })}</div>
+                                                    <div class="text-xs text-slate-500 mt-0.5">
+                                                        {new Date(item.checkInTime).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})} 
+                                                        {" - "}
+                                                        {item.checkOutTime ? new Date(item.checkOutTime).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : 'Chưa kết thúc'}
+                                                    </div>
+                                                </div>
+
+                                                <div class="text-right">
+                                                    <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                                        {item.durationMinutes} phút
+                                                    </span>
+                                                    {item.isLocked && (
+                                                        <div class="text-[10px] text-slate-400 mt-1 flex items-center justify-end gap-1">
+                                                            <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                                            <span>Đã Khóa</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* GPS Verification Badge */}
+                                            <div class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                                                <span class="flex items-center gap-1 text-emerald-600 font-medium">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                                    Đúng vị trí nhà học viên
+                                                </span>
+                                                <span class="font-mono text-[10px] text-slate-400">ID: {item.id.slice(-6)}</span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                    </main>
+
+                    {/* Footer / Copyright */}
+                    <footer class="p-3 bg-slate-50 border-t border-slate-200 text-center text-[11px] text-slate-400">
+                        Tutor Check-In System &bull; Static PWA Client
+                    </footer>
+
+                    {/* MODAL: SUPABASE CONFIGURATION */}
+                    {isConfigOpen && (
+                        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div class="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+                                <div class="flex justify-between items-center border-b pb-2">
+                                    <h3 class="font-bold text-slate-800 text-base">Cấu Hình Supabase DB</h3>
+                                    <button onClick={() => setIsConfigOpen(false)} class="text-slate-400 hover:text-slate-600">&times;</button>
+                                </div>
+                                <p class="text-xs text-slate-500">Nhập URL và Anon Key dự án Supabase để kết nối backend PostgreSQL thực tế.</p>
+                                
+                                <div class="space-y-3 text-xs">
+                                    <div>
+                                        <label class="block font-semibold text-slate-700 mb-1">Supabase Project URL</label>
+                                        <input 
+                                            type="text" 
+                                            placeholder="https://xyz.supabase.co"
+                                            value={supabaseConfig.url}
+                                            onChange={(e) => setSupabaseConfig({...supabaseConfig, url: e.target.value})}
+                                            class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label class="block font-semibold text-slate-700 mb-1">Supabase Anon Key</label>
+                                        <textarea 
+                                            rows="3"
+                                            placeholder="eyJhbGciOiJIUzI1NiIsIn..."
+                                            value={supabaseConfig.key}
+                                            onChange={(e) => setSupabaseConfig({...supabaseConfig, key: e.target.value})}
+                                            class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div class="flex space-x-2 pt-2">
+                                    <button 
+                                        onClick={() => {
+                                            localStorage.setItem('supabase_config', JSON.stringify(supabaseConfig));
+                                            setIsConfigOpen(false);
+                                            showAlert("Đã Lưu", "Cấu hình Supabase đã được lưu thành công.", "success");
+                                        }}
+                                        class="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition"
+                                    >
+                                        Lưu Cấu Hình
+                                    </button>
+                                    <button 
+                                        onClick={() => setIsConfigOpen(false)}
+                                        class="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition"
+                                    >
+                                        Hủy
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL: ALERT NOTIFICATION */}
+                    {notice && (
+                        <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-fade-in">
+                            <div class="bg-white rounded-2xl max-w-sm w-full p-5 text-center space-y-3 shadow-2xl">
+                                <div class={`w-12 h-12 rounded-full mx-auto flex items-center justify-center ${
+                                    notice.type === 'success' ? 'bg-emerald-100 text-emerald-600' :
+                                    notice.type === 'warning' ? 'bg-amber-100 text-amber-600' :
+                                    'bg-rose-100 text-rose-600'
+                                }`}>
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                </div>
+                                <h3 class="font-bold text-slate-800 text-base">{notice.title}</h3>
+                                <p class="text-xs text-slate-600 leading-relaxed">{notice.message}</p>
+                                <button 
+                                    onClick={() => setNotice(null)}
+                                    class="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition"
+                                >
+                                    Đã Hiểu
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        }
+
+        // Render Application
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
